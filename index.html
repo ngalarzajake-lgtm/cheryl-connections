@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta
+      name="description"
+      content="A custom Connections game made by Jake for Cheryl."
+    />
+    <title>Connections for Cheryl</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="game-shell" aria-labelledby="game-title">
+      <header class="game-header">
+        <div class="brand-lockup">
+          <svg
+            class="brand-mark"
+            viewBox="0 0 48 48"
+            aria-hidden="true"
+          >
+            <rect x="3" y="3" width="19" height="19" rx="4" />
+            <rect x="26" y="3" width="19" height="19" rx="4" />
+            <rect x="3" y="26" width="19" height="19" rx="4" />
+            <rect x="26" y="26" width="19" height="19" rx="4" />
+          </svg>
+          <span class="brand-heart" aria-hidden="true">♥</span>
+          <h1 id="game-title">Connections</h1>
+        </div>
+        <time datetime="2026-06-20">June 20, 2026</time>
+      </header>
+
+      <section class="game-board" aria-describedby="instructions">
+        <p id="instructions" class="instructions">Create four groups of four!</p>
+
+        <div id="live-region" class="sr-only" aria-live="polite"></div>
+        <div id="solved-groups" class="solved-groups" aria-label="Solved groups"></div>
+        <div id="tile-grid" class="tile-grid" aria-label="Connection tiles"></div>
+
+        <div id="question-stage" class="question-stage" hidden>
+          <button id="yes-button" class="yes-button paper-texture" type="button">
+            <span aria-hidden="true">♥</span>
+            Yes
+          </button>
+        </div>
+
+        <div class="mistakes" aria-label="Mistakes remaining">
+          <span>Mistakes remaining:</span>
+          <div id="mistake-dots" class="mistake-dots" aria-hidden="true"></div>
+        </div>
+
+        <div class="controls" aria-label="Game controls">
+          <button id="shuffle-button" class="control-button" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />
+            </svg>
+            Shuffle
+          </button>
+          <button id="deselect-button" class="control-button" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 5l14 14M19 5 5 19" />
+            </svg>
+            Deselect All
+          </button>
+          <button id="submit-button" class="control-button" type="button" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m4 12 5 5L20 6" />
+            </svg>
+            Submit
+          </button>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <div id="game-over" class="modal-backdrop" hidden>
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="game-over-title">
+        <p class="modal-heart" aria-hidden="true">♥</p>
+        <h2 id="game-over-title">So close!</h2>
+        <p>This connection is worth another try.</p>
+        <button id="restart-button" class="primary-button" type="button">Try again</button>
+      </section>
+    </div>
+
+    <div id="celebration" class="celebration" hidden>
+      <div id="heart-field" class="heart-field" aria-hidden="true"></div>
+      <section class="celebration-card" role="dialog" aria-modal="true" aria-labelledby="celebration-title">
+        <p class="celebration-heart" aria-hidden="true">♥</p>
+        <h2 id="celebration-title">Best connection ever.</h2>
+        <p>Cheryl + Jake</p>
+        <button id="play-again-button" class="primary-button" type="button">Play again</button>
+      </section>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
