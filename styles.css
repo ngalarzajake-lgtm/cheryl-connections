@@ -212,6 +212,12 @@ button:focus-visible {
   transform: translateY(-2px);
 }
 
+.tile.is-locked,
+.tile.is-locked:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
 .tile-grid.is-shaking {
   animation: shake 390ms ease;
 }
