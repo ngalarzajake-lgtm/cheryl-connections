@@ -46,6 +46,11 @@ const GROUPS = [
 
 const YES_TILE = { id: "yes", label: "Yes" };
 const MAX_MISTAKES = 4;
+const LOCKED_QUESTION_IDS = new Set([
+  "question-will",
+  "question-be",
+  "question-girlfriend",
+]);
 
 const elements = {
   grid: document.querySelector("#tile-grid"),
@@ -87,7 +92,8 @@ function getInitialTiles() {
 function resetGame() {
   state = {
     tiles: getInitialTiles(),
-    selected: new Set(),
+    selected: new Set(LOCKED_QUESTION_IDS),
+    lockedSelected: new Set(LOCKED_QUESTION_IDS),
     solvedIds: ["likes", "thinks", "why"],
     mistakesRemaining: MAX_MISTAKES,
   };
@@ -132,17 +138,21 @@ function renderTiles() {
     ),
   );
 
+  if (state.solvedIds.includes("question")) solvedItemIds.add(YES_TILE.id);
+
   const remainingTiles = state.tiles.filter((tile) => !solvedItemIds.has(tile.id));
 
   elements.grid.innerHTML = remainingTiles
     .map((tile) => {
       const selected = state.selected.has(tile.id);
+      const locked = state.lockedSelected.has(tile.id);
       return `
         <button
-          class="tile${selected ? " is-selected" : ""}"
+          class="tile${selected ? " is-selected" : ""}${locked ? " is-locked" : ""}"
           type="button"
           data-tile-id="${tile.id}"
           aria-pressed="${selected}"
+          ${locked ? "disabled" : ""}
         >${tile.label}</button>
       `;
     })
@@ -161,18 +171,21 @@ function renderMistakes() {
 }
 
 function requiredSelectionCount() {
-  return state.solvedIds.length === 3 ? 3 : 4;
+  return 4;
 }
 
 function updateControls() {
   const solved = state.solvedIds.length === GROUPS.length;
   const required = requiredSelectionCount();
+  const hasRemovableSelection = [...state.selected].some((id) => !state.lockedSelected.has(id));
   elements.submit.disabled = solved || state.selected.size !== required;
-  elements.deselect.disabled = solved || state.selected.size === 0;
-  elements.shuffle.disabled = solved;
+  elements.deselect.disabled = solved || !hasRemovableSelection;
+  elements.shuffle.disabled = solved || state.solvedIds.length === 3;
 }
 
 function toggleTile(tileId) {
+  if (state.lockedSelected.has(tileId)) return;
+
   const required = requiredSelectionCount();
 
   if (state.selected.has(tileId)) {
@@ -197,6 +210,17 @@ function submitSelection() {
     return;
   }
 
+  const finalIds = new Set([...LOCKED_QUESTION_IDS, YES_TILE.id]);
+  const isFinalAnswer =
+    state.solvedIds.length === 3 &&
+    selectedIds.length === finalIds.size &&
+    selectedIds.every((id) => finalIds.has(id));
+
+  if (isFinalAnswer) {
+    solveFinalQuestion();
+    return;
+  }
+
   const match = GROUPS.find((group) => {
     if (state.solvedIds.includes(group.id)) return false;
     const groupIds = new Set(group.items.map((item) => item.id));
@@ -209,6 +233,16 @@ function submitSelection() {
   }
 
   registerMistake(selectedIds);
+}
+
+function solveFinalQuestion() {
+  const group = GROUPS.find((candidate) => candidate.id === "question");
+  state.solvedIds.push(group.id);
+  state.selected.clear();
+  state.lockedSelected.clear();
+  announce("Will you be my girlfriend? Yes.");
+  render();
+  window.setTimeout(celebrate, 560);
 }
 
 function solveGroup(group) {
@@ -300,7 +334,7 @@ elements.shuffle.addEventListener("click", () => {
 });
 
 elements.deselect.addEventListener("click", () => {
-  state.selected.clear();
+  state.selected = new Set(state.lockedSelected);
   renderTiles();
   updateControls();
 });
