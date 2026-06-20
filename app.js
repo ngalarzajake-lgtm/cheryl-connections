@@ -179,7 +179,7 @@ function updateControls() {
   const required = requiredSelectionCount();
   const hasRemovableSelection = [...state.selected].some((id) => !state.lockedSelected.has(id));
   elements.submit.disabled = solved || state.selected.size !== required;
-  elements.deselect.disabled = solved || !hasRemovableSelection;
+  elements.deselect.disabled = solved || state.solvedIds.length === 3 || !hasRemovableSelection;
   elements.shuffle.disabled = solved || state.solvedIds.length === 3;
 }
 
