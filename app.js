@@ -46,11 +46,13 @@ const GROUPS = [
 
 const YES_TILE = { id: "yes", label: "Yes" };
 const MAX_MISTAKES = 4;
-const LOCKED_QUESTION_IDS = new Set([
-  "question-will",
-  "question-be",
-  "question-girlfriend",
-]);
+const AUTO_SOLVE_GROUP_IDS = ["likes", "thinks", "why"];
+const QUESTION_SEQUENCE_IDS = ["question-will", "question-be", "question-girlfriend"];
+const AUTO_INITIAL_DELAY = 650;
+const AUTO_CLICK_DELAY = 430;
+const AUTO_SUBMIT_DELAY = 520;
+const AUTO_GROUP_PAUSE = 850;
+const AUTO_FINAL_PROMPT_DELAY = 360;
 
 const elements = {
   grid: document.querySelector("#tile-grid"),
@@ -72,6 +74,8 @@ const elements = {
 
 let state;
 let toastTimer;
+let autoTimers = [];
+let autoRunId = 0;
 
 function shuffle(items) {
   const result = [...items];
@@ -82,20 +86,38 @@ function shuffle(items) {
   return result;
 }
 
+function getGroup(groupId) {
+  return GROUPS.find((candidate) => candidate.id === groupId);
+}
+
+function getTileById(tileId) {
+  return state.tiles.find((tile) => tile.id === tileId);
+}
+
 function getInitialTiles() {
-  const groupTiles = GROUPS.flatMap((group) =>
-    group.items.map((item) => ({ ...item, groupId: group.id })),
+  const autoSolvedTiles = AUTO_SOLVE_GROUP_IDS.flatMap((groupId) =>
+    getGroup(groupId).items.map((item) => ({ ...item, groupId })),
   );
-  return shuffle([...groupTiles, { ...YES_TILE, groupId: "answer" }]);
+
+  const questionTiles = QUESTION_SEQUENCE_IDS.map((tileId) => {
+    const item = getGroup("question").items.find((candidate) => candidate.id === tileId);
+    return { ...item, groupId: "question" };
+  });
+
+  return [...shuffle(autoSolvedTiles), ...questionTiles, { ...YES_TILE, groupId: "question" }];
 }
 
 function resetGame() {
+  stopAutoPlay();
+
   state = {
     tiles: getInitialTiles(),
-    selected: new Set(LOCKED_QUESTION_IDS),
-    lockedSelected: new Set(LOCKED_QUESTION_IDS),
-    solvedIds: ["likes", "thinks", "why"],
+    selected: new Set(),
+    lockedSelected: new Set(),
+    solvedIds: [],
     mistakesRemaining: MAX_MISTAKES,
+    isAutoPlaying: true,
+    autoClickedId: null,
   };
 
   elements.gameOver.hidden = true;
@@ -107,6 +129,7 @@ function resetGame() {
   elements.submit.hidden = false;
   elements.mistakes.closest(".mistakes").hidden = false;
   render();
+  startAutoPlay();
 }
 
 function render() {
@@ -116,11 +139,16 @@ function render() {
   updateControls();
 }
 
+function groupDisplayLabels(group) {
+  const labels = group.items.map((item) => item.label);
+  return group.id === "question" ? [...labels, YES_TILE.label] : labels;
+}
+
 function renderSolvedGroups() {
   elements.solved.innerHTML = state.solvedIds
     .map((groupId) => {
-      const group = GROUPS.find((candidate) => candidate.id === groupId);
-      const labels = group.items.map((item) => item.label).join(", ");
+      const group = getGroup(groupId);
+      const labels = groupDisplayLabels(group).join(", ");
       return `
         <article class="solved-group paper-texture" style="--group-color: ${group.color}">
           <h2>${group.title}</h2>
@@ -146,13 +174,15 @@ function renderTiles() {
     .map((tile) => {
       const selected = state.selected.has(tile.id);
       const locked = state.lockedSelected.has(tile.id);
+      const autoClicked = state.autoClickedId === tile.id;
+      const disabled = locked || state.isAutoPlaying;
       return `
         <button
-          class="tile${selected ? " is-selected" : ""}${locked ? " is-locked" : ""}"
+          class="tile${selected ? " is-selected" : ""}${locked ? " is-locked" : ""}${autoClicked ? " is-auto-clicked" : ""}"
           type="button"
           data-tile-id="${tile.id}"
           aria-pressed="${selected}"
-          ${locked ? "disabled" : ""}
+          ${disabled ? "disabled" : ""}
         >${tile.label}</button>
       `;
     })
@@ -178,13 +208,21 @@ function updateControls() {
   const solved = state.solvedIds.length === GROUPS.length;
   const required = requiredSelectionCount();
   const hasRemovableSelection = [...state.selected].some((id) => !state.lockedSelected.has(id));
-  elements.submit.disabled = solved || state.selected.size !== required;
-  elements.deselect.disabled = solved || state.solvedIds.length === 3 || !hasRemovableSelection;
-  elements.shuffle.disabled = solved || state.solvedIds.length === 3;
+  const lockedByAuto = state.isAutoPlaying;
+
+  elements.submit.disabled = lockedByAuto || solved || state.selected.size !== required;
+  elements.deselect.disabled = lockedByAuto || solved || !hasRemovableSelection;
+  elements.shuffle.disabled = lockedByAuto || solved || state.solvedIds.length >= 3;
+  elements.grid.setAttribute("aria-busy", state.isAutoPlaying ? "true" : "false");
+
+  elements.shuffle.hidden = solved;
+  elements.deselect.hidden = solved;
+  elements.submit.hidden = solved;
+  elements.mistakes.closest(".mistakes").hidden = solved;
 }
 
 function toggleTile(tileId) {
-  if (state.lockedSelected.has(tileId)) return;
+  if (state.isAutoPlaying || state.lockedSelected.has(tileId)) return;
 
   const required = requiredSelectionCount();
 
@@ -202,6 +240,8 @@ function toggleTile(tileId) {
 }
 
 function submitSelection() {
+  if (state.isAutoPlaying) return;
+
   const selectedIds = [...state.selected];
   const expectedCount = requiredSelectionCount();
 
@@ -210,9 +250,9 @@ function submitSelection() {
     return;
   }
 
-  const finalIds = new Set([...LOCKED_QUESTION_IDS, YES_TILE.id]);
+  const finalIds = new Set([...QUESTION_SEQUENCE_IDS, YES_TILE.id]);
   const isFinalAnswer =
-    state.solvedIds.length === 3 &&
+    state.solvedIds.length === AUTO_SOLVE_GROUP_IDS.length &&
     selectedIds.length === finalIds.size &&
     selectedIds.every((id) => finalIds.has(id));
 
@@ -222,12 +262,12 @@ function submitSelection() {
   }
 
   const match = GROUPS.find((group) => {
-    if (state.solvedIds.includes(group.id)) return false;
+    if (state.solvedIds.includes(group.id) || group.id === "question") return false;
     const groupIds = new Set(group.items.map((item) => item.id));
     return selectedIds.length === group.items.length && selectedIds.every((id) => groupIds.has(id));
   });
 
-  if (match && (match.id !== "question" || state.solvedIds.length === 3)) {
+  if (match) {
     solveGroup(match);
     return;
   }
@@ -235,25 +275,27 @@ function submitSelection() {
   registerMistake(selectedIds);
 }
 
-function solveFinalQuestion() {
-  const group = GROUPS.find((candidate) => candidate.id === "question");
+function solveGroup(group) {
+  if (state.solvedIds.includes(group.id)) return;
+
   state.solvedIds.push(group.id);
   state.selected.clear();
   state.lockedSelected.clear();
+  announce(`${group.title}: ${groupDisplayLabels(group).join(", ")}`);
+  render();
+}
+
+function solveFinalQuestion() {
+  if (state.solvedIds.includes("question")) return;
+
+  const group = getGroup("question");
+  state.selected.clear();
+  state.lockedSelected.clear();
+  state.solvedIds.push(group.id);
+
   announce("Will you be my girlfriend? Yes.");
   render();
   window.setTimeout(celebrate, 560);
-}
-
-function solveGroup(group) {
-  state.solvedIds.push(group.id);
-  state.selected.clear();
-  announce(`${group.title}: ${group.items.map((item) => item.label).join(", ")}`);
-  render();
-
-  if (group.id === "question") {
-    window.setTimeout(revealYes, 460);
-  }
 }
 
 function registerMistake(selectedIds) {
@@ -280,11 +322,79 @@ function registerMistake(selectedIds) {
   showToast(oneAway ? "One away…" : "Not quite.");
 }
 
-function revealYes() {
-  elements.grid.hidden = true;
-  elements.questionStage.hidden = false;
-  elements.yesButton.focus();
-  announce("Only one answer remains: Yes.");
+function startAutoPlay() {
+  const runId = autoRunId;
+  let delay = AUTO_INITIAL_DELAY;
+
+  AUTO_SOLVE_GROUP_IDS.forEach((groupId) => {
+    const group = getGroup(groupId);
+
+    group.items.forEach((item) => {
+      scheduleAutoStep(() => autoSelectTile(item.id, runId), delay);
+      delay += AUTO_CLICK_DELAY;
+    });
+
+    scheduleAutoStep(() => autoSolveGroup(groupId, runId), delay + AUTO_SUBMIT_DELAY);
+    delay += AUTO_SUBMIT_DELAY + AUTO_GROUP_PAUSE;
+  });
+
+  QUESTION_SEQUENCE_IDS.forEach((tileId) => {
+    scheduleAutoStep(() => autoSelectTile(tileId, runId, { lock: true }), delay);
+    delay += AUTO_CLICK_DELAY;
+  });
+
+  scheduleAutoStep(() => finishAutoPrompt(runId), delay + AUTO_FINAL_PROMPT_DELAY);
+}
+
+function scheduleAutoStep(callback, delay) {
+  const timer = window.setTimeout(callback, delay);
+  autoTimers.push(timer);
+}
+
+function isCurrentAutoRun(runId) {
+  return state && state.isAutoPlaying && runId === autoRunId;
+}
+
+function autoSelectTile(tileId, runId, options = {}) {
+  if (!isCurrentAutoRun(runId)) return;
+
+  state.selected.add(tileId);
+  if (options.lock) state.lockedSelected.add(tileId);
+  state.autoClickedId = tileId;
+  announce(getTileById(tileId)?.label ?? "Selected");
+  renderTiles();
+  updateControls();
+
+  scheduleAutoStep(() => {
+    if (!state || runId !== autoRunId) return;
+    state.autoClickedId = null;
+    renderTiles();
+  }, 310);
+}
+
+function autoSolveGroup(groupId, runId) {
+  if (!isCurrentAutoRun(runId)) return;
+  solveGroup(getGroup(groupId));
+}
+
+function finishAutoPrompt(runId) {
+  if (!isCurrentAutoRun(runId)) return;
+
+  state.isAutoPlaying = false;
+  state.selected = new Set(QUESTION_SEQUENCE_IDS);
+  state.lockedSelected = new Set(QUESTION_SEQUENCE_IDS);
+  state.autoClickedId = null;
+
+  announce("Will you be my girlfriend? Select Yes, then Submit.");
+  render();
+  const yesTile = elements.grid.querySelector('[data-tile-id="yes"]');
+  yesTile?.focus();
+}
+
+function stopAutoPlay() {
+  autoTimers.forEach((timer) => window.clearTimeout(timer));
+  autoTimers = [];
+  autoRunId += 1;
 }
 
 function celebrate() {
@@ -320,6 +430,8 @@ function announce(message) {
 }
 
 elements.shuffle.addEventListener("click", () => {
+  if (state.isAutoPlaying) return;
+
   const solvedItemIds = new Set(
     GROUPS.filter((group) => state.solvedIds.includes(group.id)).flatMap((group) =>
       group.items.map((item) => item.id),
@@ -334,13 +446,15 @@ elements.shuffle.addEventListener("click", () => {
 });
 
 elements.deselect.addEventListener("click", () => {
+  if (state.isAutoPlaying) return;
+
   state.selected = new Set(state.lockedSelected);
   renderTiles();
   updateControls();
 });
 
 elements.submit.addEventListener("click", submitSelection);
-elements.yesButton.addEventListener("click", celebrate);
+elements.yesButton.addEventListener("click", () => toggleTile(YES_TILE.id));
 elements.restart.addEventListener("click", resetGame);
 elements.playAgain.addEventListener("click", resetGame);
 
